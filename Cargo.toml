@@ -1,0 +1,21 @@
+[package]
+name = "safety_monitor_edge"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# 1. Não bộ AI (Đã bỏ copy-tensors theo chuẩn bản 2.0)
+ort = { version = "2.0.0-rc.12", features = ["ndarray"] }
+ndarray = "0.17"
+
+# 2. Mắt (Camera - dùng Media Foundation của Windows)
+nokhwa = { version = "0.10", features = ["input-msmf"] }
+
+# 3. Tay (Xử lý ảnh và Vẽ khung)
+image = "0.25"
+imageproc = "0.25"
+rusttype = "0.9" # Để ghi text (tên Class) lên ảnh
+
+# 4. Giao diện (Mở cửa sổ hiển thị)
+minifb = "0.25"
+crossbeam-channel = "0.5.15"

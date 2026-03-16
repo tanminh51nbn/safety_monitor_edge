@@ -1,0 +1,21 @@
+    Checking safety_monitor_edge v0.1.0 (D:\Document\safety_monitor_edge)
+warning: field `confidence` is never read
+  --> src\types.rs:11:9
+   |
+ 5 | pub struct BoundingBox {
+   |            ----------- field in this struct
+...
+11 |     pub confidence: f32,// Độ tự tin của AI (0.0 -> 1.0)
+   |         ^^^^^^^^^^
+   |
+   = note: `BoundingBox` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `CLASS_NAMES` is never used
+  --> src\types.rs:15:11
+   |
+15 | pub const CLASS_NAMES: [&str; 2] = ["Helmet", "No_Helmet"];
+   |           ^^^^^^^^^^^
+
+warning: `safety_monitor_edge` (bin "safety_monitor_edge") generated 2 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.82s

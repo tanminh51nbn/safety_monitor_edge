@@ -1,0 +1,11 @@
+safety_monitor_edge/
+├── Cargo.toml
+├── models/
+│   └── best.onnx            <-- "Bộ não" AI nằm ở đây
+├── src/
+│   ├── main.rs              <-- Người điều phối (Orchestrator)
+│   ├── types.rs             <-- Định nghĩa kiểu dữ liệu (Structs)
+│   ├── camera.rs            <-- Module I/O: Đọc luồng video/webcam
+│   ├── engine.rs            <-- Module AI: Nạp mô hình và chạy Inference
+│   ├── processing.rs        <-- Module Tính toán: Tiền xử lý & Hậu xử lý (NMS)
+│   └── visualizer.rs        <-- Module Giao diện: Vẽ khung Bounding Box và FPS
