@@ -1,7 +1,9 @@
-use nokhwa::Camera;
-use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType, Resolution, CameraFormat, FrameFormat}; 
-use nokhwa::pixel_format::RgbFormat;
 use image::{ImageBuffer, Rgb};
+use nokhwa::pixel_format::RgbFormat;
+use nokhwa::utils::{
+    CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution,
+};
+use nokhwa::Camera;
 use std::error::Error;
 
 pub struct EdgeCamera {
@@ -16,7 +18,7 @@ impl EdgeCamera {
         let format = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(target_format));
         let mut cam = Camera::new(index, format)?;
         cam.open_stream()?;
-        
+
         Ok(Self { cam })
     }
 

@@ -19,3 +19,4 @@ rusttype = "0.9" # Để ghi text (tên Class) lên ảnh
 # 4. Giao diện (Mở cửa sổ hiển thị)
 minifb = "0.25"
 crossbeam-channel = "0.5.15"
+sysinfo = "0.30"
