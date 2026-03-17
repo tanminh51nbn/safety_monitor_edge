@@ -1,5 +1,8 @@
-use image::{imageops::FilterType, ImageBuffer, Rgb};
+use fast_image_resize as fir;
+use image::{ImageBuffer, Rgb};
 use ndarray::{Array4, ArrayView3};
+use rayon::prelude::*;
+use std::num::NonZeroU32;
 
 use crate::types::BoundingBox;
 
@@ -19,8 +22,10 @@ pub fn preprocess(
     input_w: u32,
     input_h: u32,
 ) -> PreprocessOutput {
-    let orig_w = img.width() as f32;
-    let orig_h = img.height() as f32;
+    let orig_w_u32 = img.width();
+    let orig_h_u32 = img.height();
+    let orig_w = orig_w_u32 as f32;
+    let orig_h = orig_h_u32 as f32;
     let target_w = input_w as f32;
     let target_h = input_h as f32;
     let scale = (target_w / orig_w).min(target_h / orig_h);
@@ -28,7 +33,24 @@ pub fn preprocess(
     let new_unpad_w = (orig_w * scale).round() as u32;
     let new_unpad_h = (orig_h * scale).round() as u32;
 
-    let resized_img = image::imageops::resize(img, new_unpad_w, new_unpad_h, FilterType::Triangle);
+    let src_raw = img.as_raw().to_vec();
+    let src_image = fir::Image::from_vec_u8(
+        NonZeroU32::new(orig_w_u32).expect("Lỗi: Chiều rộng ảnh nguồn không hợp lệ"),
+        NonZeroU32::new(orig_h_u32).expect("Lỗi: Chiều cao ảnh nguồn không hợp lệ"),
+        src_raw,
+        fir::PixelType::U8x3,
+    )
+    .expect("Lỗi: Không thể tạo buffer ảnh nguồn");
+    let mut dst_image = fir::Image::new(
+        NonZeroU32::new(new_unpad_w).expect("Lỗi: Chiều rộng ảnh resize không hợp lệ"),
+        NonZeroU32::new(new_unpad_h).expect("Lỗi: Chiều cao ảnh resize không hợp lệ"),
+        fir::PixelType::U8x3,
+    );
+    let mut resizer = fir::Resizer::new(fir::ResizeAlg::Convolution(fir::FilterType::CatmullRom));
+    resizer
+        .resize(&src_image.view(), &mut dst_image.view_mut())
+        .expect("Lỗi: Resize thất bại");
+    let resized_data = dst_image.buffer();
 
     let pad_w = (input_w - new_unpad_w) / 2;
     let pad_h = (input_h - new_unpad_h) / 2;
@@ -36,13 +58,43 @@ pub fn preprocess(
     let mut input_tensor =
         Array4::<f32>::from_elem((1, 3, input_h as usize, input_w as usize), 114.0 / 255.0);
 
-    for (x, y, pixel) in resized_img.enumerate_pixels() {
-        let px = x as usize + pad_w as usize;
-        let py = y as usize + pad_h as usize;
-        input_tensor[[0, 0, py, px]] = pixel[0] as f32 / 255.0;
-        input_tensor[[0, 1, py, px]] = pixel[1] as f32 / 255.0;
-        input_tensor[[0, 2, py, px]] = pixel[2] as f32 / 255.0;
-    }
+    let resized_w = new_unpad_w as usize;
+    let resized_h = new_unpad_h as usize;
+    let input_w = input_w as usize;
+    let input_h = input_h as usize;
+    let pad_w_usize = pad_w as usize;
+    let pad_h_usize = pad_h as usize;
+    let tensor_slice = input_tensor
+        .as_slice_mut()
+        .expect("Lỗi: Tensor không liên tục trong bộ nhớ");
+    let hw = input_h * input_w;
+    let data = resized_data;
+    let row_stride = resized_w * 3;
+
+    let (r_channel, rest) = tensor_slice.split_at_mut(hw);
+    let (g_channel, b_channel) = rest.split_at_mut(hw);
+    let valid_y_start = pad_h_usize;
+    let valid_y_end = pad_h_usize + resized_h;
+
+    r_channel
+        .par_chunks_mut(input_w)
+        .zip(g_channel.par_chunks_mut(input_w))
+        .zip(b_channel.par_chunks_mut(input_w))
+        .enumerate()
+        .for_each(|(y, ((r_row, g_row), b_row))| {
+            if y < valid_y_start || y >= valid_y_end {
+                return;
+            }
+            let src_y = y - valid_y_start;
+            let src_row = &data[src_y * row_stride..(src_y + 1) * row_stride];
+            for x in 0..resized_w {
+                let src_idx = x * 3;
+                let dst_idx = pad_w_usize + x;
+                r_row[dst_idx] = src_row[src_idx] as f32 / 255.0;
+                g_row[dst_idx] = src_row[src_idx + 1] as f32 / 255.0;
+                b_row[dst_idx] = src_row[src_idx + 2] as f32 / 255.0;
+            }
+        });
 
     PreprocessOutput {
         tensor: input_tensor,

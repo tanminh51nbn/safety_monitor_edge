@@ -12,9 +12,9 @@ use sysinfo::System;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-const MODEL_PATH: &str = "models/best_640x384.onnx";
-const INPUT_W: u32 = 640;
-const INPUT_H: u32 = 384;
+const MODEL_PATH: &str = "models/best_480x288_int8.onnx";
+const INPUT_W: u32 = 480;
+const INPUT_H: u32 = 288;
 
 #[derive(Clone)]
 struct FramePacket {
@@ -218,64 +218,68 @@ fn main() {
     println!("Đã tắt luồng video an toàn!");
 
     let stats = summary.lock().unwrap().clone();
-    println!("=== TÓM TẮT HIỆU NĂNG ===");
+    println!("\n=== TÓM TẮT HIỆU NĂNG (avg/min/max) ===");
     println!(
-        "Camera FPS avg/min/max: {:.2}/{:.2}/{:.2}",
+        "Camera FPS: {:.2}/{:.2}/{:.2}",
         stats.camera_fps.avg(),
         stats.camera_fps.min,
         stats.camera_fps.max
     );
     println!(
-        "AI FPS avg/min/max: {:.2}/{:.2}/{:.2}",
+        "AI FPS: {:.2}/{:.2}/{:.2}",
         stats.ai_fps.avg(),
         stats.ai_fps.min,
         stats.ai_fps.max
     );
+    println!("\n");
     println!(
-        "Latency preprocess ms avg/min/max: {:.2}/{:.2}/{:.2}",
+        "Latency preprocess: {:.2}/{:.2}/{:.2} (ms)",
         stats.preprocess_ms.avg(),
         stats.preprocess_ms.min,
         stats.preprocess_ms.max
     );
     println!(
-        "Latency inference ms avg/min/max: {:.2}/{:.2}/{:.2}",
+        "Latency inference: {:.2}/{:.2}/{:.2} (ms)",
         stats.inference_ms.avg(),
         stats.inference_ms.min,
         stats.inference_ms.max
     );
     println!(
-        "Latency postprocess ms avg/min/max: {:.2}/{:.2}/{:.2}",
+        "Latency postprocess: {:.2}/{:.2}/{:.2} (ms)",
         stats.postprocess_ms.avg(),
         stats.postprocess_ms.min,
         stats.postprocess_ms.max
     );
     println!(
-        "Latency total ms avg/min/max: {:.2}/{:.2}/{:.2}",
+        "Latency total: {:.2}/{:.2}/{:.2} (ms)",
         stats.total_ms.avg(),
         stats.total_ms.min,
         stats.total_ms.max
     );
     println!(
-        "Latency end-to-end ms avg/min/max: {:.2}/{:.2}/{:.2}",
+        "Latency end-to-end: {:.2}/{:.2}/{:.2} (ms)",
         stats.e2e_ms.avg(),
         stats.e2e_ms.min,
         stats.e2e_ms.max
     );
+    println!("\n");
     println!(
-        "RSS MB avg/min/max: {:.2}/{:.2}/{:.2}",
+        "RSS: {:.2}/{:.2}/{:.2} (MB)",
         stats.rss_mb.avg(),
         stats.rss_mb.min,
         stats.rss_mb.max
     );
     println!(
-        "CPU % avg/min/max: {:.2}/{:.2}/{:.2}",
+        "CPU: {:.2}/{:.2}/{:.2} (%)",
         stats.cpu_pct.avg(),
         stats.cpu_pct.min,
         stats.cpu_pct.max
     );
+    println!("\n");
     println!(
         "Frames processed: {} | Frames dropped: {}",
         *processed_frames.lock().unwrap(),
         *dropped_frames.lock().unwrap()
     );
+    println!("\n=== KẾT THÚC CHƯƠNG TRÌNH ===");
 }

@@ -20,3 +20,5 @@ rusttype = "0.9" # Để ghi text (tên Class) lên ảnh
 minifb = "0.25"
 crossbeam-channel = "0.5.15"
 sysinfo = "0.30"
+rayon = "1.10"
+fast_image_resize = "2.7"
