@@ -8,6 +8,7 @@ use ort::session::Session;
 use std::error::Error;
 use std::time::Instant;
 
+const INTRA_THREAD: usize = 1;
 pub struct AIEngine {
     session: Session,
     input_w: u32,
@@ -31,8 +32,8 @@ impl AIEngine {
     pub fn new(model_path: &str, input_w: u32, input_h: u32) -> Result<Self, Box<dyn Error>> {
         // Cấu hình ORT Session để tận dụng tối đa sức mạnh CPU
         let session = Session::builder()?
-            .with_optimization_level(GraphOptimizationLevel::Level3)? // Dùng trực tiếp Enum đã cập nhật
-            .with_intra_threads(2)? // Sử dụng 2 luồng CPU để chạy suy luận
+            .with_optimization_level(GraphOptimizationLevel::Level3)?
+            .with_intra_threads(INTRA_THREAD)?
             .commit_from_file(model_path)?;
 
         Ok(Self {

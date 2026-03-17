@@ -12,9 +12,10 @@ use sysinfo::System;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-const MODEL_PATH: &str = "models/best_480x288_int8.onnx";
-const INPUT_W: u32 = 480;
-const INPUT_H: u32 = 288;
+
+const MODEL_PATH: &str = "models/best_640x384.onnx";
+const INPUT_W: u32 = 640;
+const INPUT_H: u32 = 384;
 
 #[derive(Clone)]
 struct FramePacket {
