@@ -1,11 +1,10 @@
 // File: src/main.rs
 mod camera;
 mod engine;
-mod types; // Gọi module Não bộ AI
+mod processing;
+mod types;
+mod visualizer;
 
-use image::Rgb;
-use imageproc::drawing::draw_hollow_rect_mut;
-use imageproc::rect::Rect;
 use minifb::{Key, Window, WindowOptions};
 use std::time::{Duration, Instant};
 use sysinfo::System;
@@ -88,12 +87,15 @@ fn main() {
     let latest_frame: Arc<Mutex<Option<FramePacket>>> = Arc::new(Mutex::new(None));
     let latest_boxes = Arc::new(Mutex::new(Vec::new()));
     let summary: Arc<Mutex<Summary>> = Arc::new(Mutex::new(Summary::default()));
+    let dropped_frames = Arc::new(Mutex::new(0_u64));
+    let processed_frames = Arc::new(Mutex::new(0_u64));
 
     let (notify_tx, notify_rx) = crossbeam_channel::bounded(1);
 
     let worker_frame = latest_frame.clone();
     let worker_boxes = latest_boxes.clone();
     let worker_summary = summary.clone();
+    let worker_processed = processed_frames.clone();
 
     // Khởi chạy Worker Thread (Chỉ làm nhiệm vụ AI ngầm)
     thread::spawn(move || {
@@ -118,6 +120,7 @@ fn main() {
                 // Chạy AI trên ảnh, không lo bị chặn UI
                 if let Ok(output) = ai_engine.process_frame(&packet.image) {
                     *worker_boxes.lock().unwrap() = output.boxes;
+                    *worker_processed.lock().unwrap() += 1;
                     let e2e_ms = packet.captured_at.elapsed().as_secs_f64() * 1000.0;
 
                     let mut stats = worker_summary.lock().unwrap();
@@ -171,47 +174,18 @@ fn main() {
                 captured_at,
             });
             // Cố gắng đánh thức Worker (Bỏ qua nếu kênh full, Worker vẫn đang mải chạy)
-            let _ = notify_tx.try_send(());
+            if notify_tx.try_send(()).is_err() {
+                *dropped_frames.lock().unwrap() += 1;
+            }
 
             // Trích xuất kết quả nhận diện (Boxes) GẦN NHẤT
             let current_boxes = latest_boxes.lock().unwrap().clone();
 
             // BƯỚC C: Vẽ Bounding Box lên ảnh
-            for bbox in current_boxes {
-                // Chọn màu: Mũ bảo hiểm (0) -> Xanh lá | Không mũ (1) -> Đỏ
-                let color = if bbox.class_id == 0 {
-                    Rgb([0, 255, 0])
-                } else {
-                    Rgb([255, 0, 0])
-                };
-
-                // Lấy y nguyên tọa độ vì AIEngine (Letterbox) đã giải max ngược về đúng không gian thật
-                let real_x = bbox.x as i32;
-                let real_y = bbox.y as i32;
-                let real_w = bbox.width as u32;
-                let real_h = bbox.height as u32;
-
-                // Giới hạn tọa độ để không bị văng lỗi khi vẽ tràn viền
-                let rx = real_x.max(0);
-                let ry = real_y.max(0);
-
-                // Vẽ khung với độ dày 3 pixel (Bằng cách lặp vẽ 3 hình chữ nhật lồng nhau)
-                for thickness in 0..3 {
-                    let t_rect = Rect::at(rx - thickness, ry - thickness).of_size(
-                        real_w + (thickness as u32) * 2,
-                        real_h + (thickness as u32) * 2,
-                    );
-                    draw_hollow_rect_mut(&mut image_rgb, t_rect, color);
-                }
-            }
+            visualizer::draw_boxes(&mut image_rgb, &current_boxes);
 
             // BƯỚC D: Thuật toán Bitwise ghép RGB (3 byte) thành u32 (4 byte) để đẩy lên màn hình
-            for (i, pixel) in image_rgb.pixels().enumerate() {
-                let r = pixel[0] as u32;
-                let g = pixel[1] as u32;
-                let b = pixel[2] as u32;
-                display_buffer[i] = (r << 16) | (g << 8) | b;
-            }
+            visualizer::fill_display_buffer(&image_rgb, &mut display_buffer);
 
             // Render khung hình lên Window
             window
@@ -298,5 +272,10 @@ fn main() {
         stats.cpu_pct.avg(),
         stats.cpu_pct.min,
         stats.cpu_pct.max
+    );
+    println!(
+        "Frames processed: {} | Frames dropped: {}",
+        *processed_frames.lock().unwrap(),
+        *dropped_frames.lock().unwrap()
     );
 }
