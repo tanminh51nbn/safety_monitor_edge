@@ -13,8 +13,8 @@ pub struct EdgeCamera {
 impl EdgeCamera {
     pub fn new() -> Result<Self, Box<dyn Error>> {
         let index = CameraIndex::Index(0);
-        let req_res = Resolution::new(1280, 720);
-        let target_format = CameraFormat::new(req_res, FrameFormat::MJPEG, 30);
+        let req_res = Resolution::new(640, 480);
+        let target_format = CameraFormat::new(req_res, FrameFormat::YUYV, 30);
         let format = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(target_format));
         let mut cam = Camera::new(index, format)?;
         cam.open_stream()?;
