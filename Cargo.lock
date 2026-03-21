@@ -2353,7 +2353,7 @@ dependencies = [
 
 [[package]]
 name = "safety_monitor_edge"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "crossbeam-channel",
