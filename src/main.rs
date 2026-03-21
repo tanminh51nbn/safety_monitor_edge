@@ -151,11 +151,36 @@ fn main() {
         Receiver<Arc<ImageBuffer<Rgb<u8>, Vec<u8>>>>,
     ) = crossbeam_channel::bounded(4);
 
+    // KHỞI TẠO BƯU TÁ MẠNG & THỢ GHI ĐĨA CHUYÊN TRÁCH (GIẢI QUYẾT LỖI UNBOUND THREADS)
+    let (audit_tx, audit_rx) = crossbeam_channel::bounded::<Arc<ImageBuffer<Rgb<u8>, Vec<u8>>>>(30);
+
+    let bg_bot_token = telegram_token.clone();
+    let bg_chat_id = telegram_chat_id.clone();
+    thread::spawn(move || {
+        while let Ok(img) = audit_rx.recv() {
+            let now = chrono::Local::now();
+            let time_str = now.format("%d/%m/%Y %H:%M:%S").to_string();
+            let file_str = now.format("%Y%m%d_%H%M%S").to_string();
+            
+            let path = format!("violations/ALARM_{}.jpg", file_str);
+            if let Err(e) = img.save(&path) {
+                println!("Lỗi ghi hình báo động xuống ổ đĩa: {}", e);
+            } else {
+                println!("Đã lưu ảnh Audit Log: {}", path);
+                if !bg_bot_token.is_empty() {
+                    let caption = format!("[🚨 CẢNH BÁO AN TOÀN]\nPhát hiện người KHÔNG ĐỘI NÓN TRANG BỊ BẢO HỘ.\n⏰ Thời gian: {}", time_str);
+                    bot_alert::send_telegram_alert(&bg_bot_token, &bg_chat_id, &path, &caption);
+                }
+            }
+        }
+    });
+
     let worker_frame = latest_frame.clone();
     let worker_boxes = latest_boxes.clone();
     let worker_summary = summary.clone();
     let worker_processed = processed_frames.clone();
     let worker_boxes_tx = boxes_tx.clone();
+    let worker_audit_tx = audit_tx.clone();
 
     // Khởi chạy Worker Thread (Chỉ làm nhiệm vụ AI ngầm)
     thread::spawn(move || {
@@ -189,30 +214,15 @@ fn main() {
                         }
                     }
 
-                    // Điều khiển Hệ Máy Trạng Thái Cảnh Báo 
                     let trigger_snapshot = alarm_state.update(has_violation);
                     if trigger_snapshot {
-                        println!(">>> [ALARM TRIPPED] PHÁT HIỆN VI PHẠM KHÔNG ĐỘI NÓN! ĐANG LƯU BẰNG CHỨNG...");
+                        println!(">>> [ALARM TRIPPED] PHÁT HIỆN VI PHẠM KHÔNG ĐỘI NÓN! ĐANG GỬI VÀO HÀNG ĐỢI LOGGING...");
                         let img_clone = packet.image.as_ref().clone(); 
-                        let bot_token = telegram_token.clone();
-                        let chat_id = telegram_chat_id.clone();
                         
-                        thread::spawn(move || {
-                            let now = chrono::Local::now();
-                            let time_str = now.format("%d/%m/%Y %H:%M:%S").to_string();
-                            let file_str = now.format("%Y%m%d_%H%M%S").to_string();
-                            
-                            let path = format!("violations/ALARM_{}.jpg", file_str);
-                            if let Err(e) = img_clone.save(&path) {
-                                println!("Lỗi lưu ảnh bằng chứng: {}", e);
-                            } else {
-                                println!("Đã lưu ảnh Audit Log: {}", path);
-                                if !bot_token.is_empty() {
-                                    let caption = format!("[🚨 CẢNH BÁO AN TOÀN]\nPhát hiện người KHÔNG ĐỘI NÓN TRANG BỊ BẢO HỘ.\n⏰ Thời gian: {}", time_str);
-                                    bot_alert::send_telegram_alert(&bot_token, &chat_id, &path, &caption);
-                                }
-                            }
-                        });
+                        // Quăng thẳng Bức Ảnh Nét Căng vào Giỏ Bưu tá. Tràn rác dội ngược về không cho sập RAM.
+                        if worker_audit_tx.try_send(Arc::new(img_clone)).is_err() {
+                            println!(">> [CẢNH BÁO QUÁ TẢI] Nghẽn mạng Wifi! Giỏ Hàng đợi Ảnh Báo động đã đầy ự 30 Tấm, buộc Dứt khoát Drop tấm hiện tại để bảo vệ RAM và FPS.");
+                        }
                     }
 
                     *worker_boxes.lock().unwrap() = output.boxes;
