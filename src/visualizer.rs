@@ -2,6 +2,8 @@ use image::{ImageBuffer, Rgb};
 
 use crate::types::BoundingBox;
 
+use rusttype::{Font, Scale, point};
+
 pub fn fill_display_buffer(image: &ImageBuffer<Rgb<u8>, Vec<u8>>, buffer: &mut [u32]) {
     for (i, pixel) in image.pixels().enumerate() {
         let r = pixel[0] as u32;
@@ -15,6 +17,8 @@ pub fn fill_display_buffer_with_boxes(
     image: &ImageBuffer<Rgb<u8>, Vec<u8>>,
     boxes: &[BoundingBox],
     buffer: &mut [u32],
+    is_alarming: bool,
+    font: Option<&Font>,
 ) {
     fill_display_buffer(image, buffer);
 
@@ -22,10 +26,10 @@ pub fn fill_display_buffer_with_boxes(
     let height = image.height() as i32;
 
     for bbox in boxes {
-        let color = if bbox.class_id == 0 {
-            0x00FF00
+        let (color, label) = if bbox.class_id == 0 {
+            (0x00FF00, "Helmet")
         } else {
-            0xFF0000
+            (0xFF0000, "No Helmet")
         };
 
         let x = bbox.x.max(0.0) as i32;
@@ -59,6 +63,60 @@ pub fn fill_display_buffer_with_boxes(
                 buffer[left_idx] = color;
                 buffer[right_idx] = color;
             }
+        }
+
+        // Vẽ Text trực tiếp trên hộp (OSD)
+        if let Some(f) = font {
+            let text = format!("{} {:.0}%", label, bbox.confidence * 100.0);
+            draw_text_to_buffer(buffer, width as usize, height as usize, &text, x, (y - 25).max(0), f, 24.0, color);
+        }
+    }
+
+    // VẼ CẢNH BÁO ĐỎ VIỀN QUANH MÀN HÌNH NẾU ĐANG BÁO ĐỘNG
+    if is_alarming {
+        let border_thickness = 15;
+        for y in 0..height {
+            for x in 0..width {
+                if x < border_thickness || x >= width - border_thickness || y < border_thickness || y >= height - border_thickness {
+                    buffer[(y * width + x) as usize] = 0xFF0000;
+                }
+            }
+        }
+        
+        // Vẽ chữ Báo động siêu to giữa màn hình trên
+        if let Some(f) = font {
+            draw_text_to_buffer(buffer, width as usize, height as usize, "! ALARM: VIOLATION DETECTED !", 20, 30, f, 45.0, 0xFF0000);
+        }
+    }
+}
+
+pub fn draw_text_to_buffer(
+    buffer: &mut [u32],
+    width: usize,
+    height: usize,
+    text: &str,
+    x: i32,
+    y: i32,
+    font: &Font,
+    font_scale: f32,
+    color_u32: u32,
+) {
+    let scale = Scale::uniform(font_scale);
+    let v_metrics = font.v_metrics(scale);
+    let offset = point(x as f32, y as f32 + v_metrics.ascent);
+
+    for glyph in font.layout(text, scale, offset) {
+        if let Some(bb) = glyph.pixel_bounding_box() {
+            glyph.draw(|gx, gy, v| {
+                if v > 0.5 {
+                    let px = bb.min.x + gx as i32;
+                    let py = bb.min.y + gy as i32;
+                    if px >= 0 && py >= 0 && px < width as i32 && py < height as i32 {
+                        let idx = (py as usize) * width + (px as usize);
+                        buffer[idx] = color_u32;
+                    }
+                }
+            });
         }
     }
 }

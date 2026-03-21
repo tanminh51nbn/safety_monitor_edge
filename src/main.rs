@@ -4,6 +4,7 @@ mod engine;
 mod processing;
 mod types;
 mod visualizer;
+mod alarm;
 
 use crossbeam_channel::{Receiver, Sender};
 use image::{ImageBuffer, Rgb};
@@ -15,7 +16,7 @@ use sysinfo::System;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-const MODEL_PATH: &str = "models/best_640x384_int8.onnx";
+const MODEL_PATH: &str = "models/best_640x384.onnx";
 const INPUT_W: u32 = 640;
 const INPUT_H: u32 = 384;
 const TARGET_CAMERA_FPS: f64 = 24.0;
@@ -136,7 +137,7 @@ fn main() {
     let (notify_tx, notify_rx) = crossbeam_channel::bounded(1);
     let (render_tx, render_rx): (Sender<FramePacket>, Receiver<FramePacket>) =
         crossbeam_channel::bounded(1);
-    let (boxes_tx, boxes_rx) = crossbeam_channel::bounded(1);
+    let (boxes_tx, boxes_rx) = crossbeam_channel::bounded::<(Vec<types::BoundingBox>, bool)>(1);
     let (pool_tx, pool_rx): (
         Sender<Arc<ImageBuffer<Rgb<u8>, Vec<u8>>>>,
         Receiver<Arc<ImageBuffer<Rgb<u8>, Vec<u8>>>>,
@@ -161,6 +162,8 @@ fn main() {
 
         let mut ai_frames: u32 = 0;
         let mut ai_timer = Instant::now();
+        let mut alarm_state = alarm::AlarmStateMachine::new(5, 5); // Cảnh báo Debounce 5 frame, 5s tồn rớt Cooldown.
+        let _ = std::fs::create_dir_all("violations"); // Đảm bảo tạo thư mục kiểm toán
 
         // Vòng lặp suy luận chạy độc lập
         while let Ok(_) = notify_rx.recv() {
@@ -170,8 +173,32 @@ fn main() {
             if let Some(packet) = frame {
                 // Chạy AI trên ảnh, không lo bị chặn UI
                 if let Ok(output) = ai_engine.process_frame(packet.image.as_ref()) {
+                    let mut has_violation = false;
+                    for b in &output.boxes {
+                        if b.class_id == 1 {
+                            has_violation = true;
+                            break;
+                        }
+                    }
+
+                    // Điều khiển Hệ Máy Trạng Thái Cảnh Báo 
+                    let trigger_snapshot = alarm_state.update(has_violation);
+                    if trigger_snapshot {
+                        println!(">>> [ALARM TRIPPED] PHÁT HIỆN VI PHẠM KHÔNG ĐỘI NÓN! ĐANG LƯU BẰNG CHỨNG...");
+                        let img_clone = packet.image.as_ref().clone(); 
+                        thread::spawn(move || {
+                            let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                            let path = format!("violations/ALARM_{}.jpg", timestamp);
+                            if let Err(e) = img_clone.save(&path) {
+                                println!("Lỗi lưu ảnh bằng chứng: {}", e);
+                            } else {
+                                println!("Đã lưu ảnh Audit Log: {}", path);
+                            }
+                        });
+                    }
+
                     *worker_boxes.lock().unwrap() = output.boxes;
-                    let _ = worker_boxes_tx.try_send(worker_boxes.lock().unwrap().clone());
+                    let _ = worker_boxes_tx.try_send((worker_boxes.lock().unwrap().clone(), alarm_state.is_alarming));
                     *worker_processed.lock().unwrap() += 1;
                     let e2e_ms = packet.captured_at.elapsed().as_secs_f64() * 1000.0;
 
@@ -207,7 +234,15 @@ fn main() {
     let render_running = running.clone();
     let render_thread = thread::spawn(move || {
         let mut last_boxes: Vec<types::BoundingBox> = Vec::new();
+        let mut last_alarming = false;
         let mut display_buffer: Vec<u32> = vec![0; width * height];
+        
+        let font_data = std::fs::read("C:\\Windows\\Fonts\\arial.ttf").ok();
+        let font = font_data.and_then(|data| rusttype::Font::try_from_vec(data));
+        if font.is_none() {
+            println!("Lưu ý: Không tìm nạp được C:\\Windows\\Fonts\\arial.ttf để hiển thị chữ.");
+        }
+
         let mut window = Window::new(
             "Giám Sát An Toàn - Edge AI (Bấm ESC để tắt)",
             width,
@@ -218,8 +253,9 @@ fn main() {
         window.limit_update_rate(Some(Duration::from_micros(16_600)));
 
         while render_running.load(Ordering::Relaxed) && window.is_open() {
-            while let Ok(boxes) = boxes_rx.try_recv() {
+            while let Ok((boxes, is_alarming)) = boxes_rx.try_recv() {
                 last_boxes = boxes;
+                last_alarming = is_alarming;
             }
 
             let frame = match render_rx.recv_timeout(Duration::from_millis(5)) {
@@ -236,6 +272,8 @@ fn main() {
                 frame.image.as_ref(),
                 &last_boxes,
                 &mut display_buffer,
+                last_alarming,
+                font.as_ref(),
             );
             window
                 .update_with_buffer(&display_buffer, width, height)
@@ -286,7 +324,7 @@ fn main() {
             });
             // Cố gắng đánh thức Worker (Bỏ qua nếu kênh full, Worker vẫn đang mải chạy)
             frame_index += 1;
-            if frame_index % 12 == 0 {
+            if frame_index % 8 == 0 {
                 if notify_tx.try_send(()).is_err() {
                     *dropped_frames.lock().unwrap() += 1;
                 }
