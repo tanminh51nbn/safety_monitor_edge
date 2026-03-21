@@ -1752,7 +1752,7 @@ dependencies = [
 
 [[package]]
 name = "safety_monitor_edge"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "crossbeam-channel",
  "fast_image_resize",

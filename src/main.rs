@@ -15,7 +15,7 @@ use sysinfo::System;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-const MODEL_PATH: &str = "models/best_640x384.onnx";
+const MODEL_PATH: &str = "models/best_640x384_int8.onnx";
 const INPUT_W: u32 = 640;
 const INPUT_H: u32 = 384;
 const TARGET_CAMERA_FPS: f64 = 24.0;
@@ -96,15 +96,32 @@ struct Summary {
 fn main() {
     println!("=== HỆ THỐNG GIÁM SÁT AN TOÀN EDGE AI ===");
 
-    // 1. KHỞI TẠO MẮT (CAMERA)
+    // 1. KHỞI TẠO MẮT (CAMERA) - TÍCH HỢP FAULT TOLERANCE
     println!("Đang khởi động Camera...");
-    let mut edge_cam = camera::EdgeCamera::new().expect("Lỗi: Không thể khởi tạo Camera!");
+    let mut edge_cam = loop {
+        match camera::EdgeCamera::new() {
+            Ok(cam) => break cam,
+            Err(e) => {
+                println!("Lỗi khởi tạo Camera: {}. Thử lại sau 2 giây...", e);
+                thread::sleep(Duration::from_secs(2));
+            }
+        }
+    };
 
-    let first_frame = edge_cam
-        .capture_frame()
-        .expect("Lỗi: Không thể chụp ảnh mồi!");
-    let width = first_frame.width() as usize; // Thường là 1280
-    let height = first_frame.height() as usize; // Thường là 720
+    let first_frame = loop {
+        match edge_cam.capture_frame() {
+            Ok(frame) => break frame,
+            Err(_) => {
+                println!("Cảnh báo: Không thể chụp ảnh mồi! Đang thử khởi động lại Camera...");
+                thread::sleep(Duration::from_secs(1));
+                if let Ok(new_cam) = camera::EdgeCamera::new() {
+                    edge_cam = new_cam;
+                }
+            }
+        }
+    };
+    let width = first_frame.width() as usize;
+    let height = first_frame.height() as usize;
 
     // 2. KHỞI TẠO ĐA LUỒNG (LIFO Producer-Consumer Pattern)
     println!("Đang tạo Kiến trúc Đa Luồng cho AI Engine...");
@@ -134,7 +151,7 @@ fn main() {
     // Khởi chạy Worker Thread (Chỉ làm nhiệm vụ AI ngầm)
     thread::spawn(move || {
         println!(
-            "Worker (AI): Đang nạp mô hình AI ({}) vào RAM...",
+            "Worker (AI): Đang nạp mô hình AI ({}) vào RAM (INT8 QDQ Ready)...",
             MODEL_PATH
         );
         println!("Worker (AI): Input size = {}x{}", INPUT_W, INPUT_H);
@@ -234,9 +251,12 @@ fn main() {
 
     // VÒNG LẶP CHÍNH (Producer/Camera)
     let mut frame_index: u64 = 0;
+    let mut fail_count: u32 = 0;
+
     while running.load(Ordering::Relaxed) {
         // BƯỚC A: Chụp ảnh từ Camera
         if let Ok(image_rgb) = edge_cam.capture_frame() {
+            fail_count = 0; // Reset bộ đếm lỗi phục hồi
             let captured_at = Instant::now();
             let mut shared_image = if let Ok(buffer) = pool_rx.try_recv() {
                 buffer
@@ -313,7 +333,18 @@ fn main() {
             if !running.load(Ordering::Relaxed) {
                 break;
             }
-            thread::sleep(Duration::from_millis(5));
+            fail_count += 1;
+            if fail_count > 100 { // Nếu mất tín hiệu ~500ms thì coi như rớt mạng camera
+                println!("!BÁO ĐỘNG!: Mất tín hiệu Camera. Đang cố gắng kết nối lại (Auto-reconnect)...");
+                if let Ok(new_cam) = camera::EdgeCamera::new() {
+                    edge_cam = new_cam;
+                    fail_count = 0;
+                    println!("=> Đã khôi phục Camera thành công!");
+                }
+                thread::sleep(Duration::from_millis(1000)); // Nghỉ 1s chờ Camera ổn định
+            } else {
+                thread::sleep(Duration::from_millis(5));
+            }
         }
     }
 

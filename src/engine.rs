@@ -5,10 +5,12 @@ use image::{ImageBuffer, Rgb};
 use ort::inputs;
 use ort::session::builder::GraphOptimizationLevel; // Đã cập nhật đường dẫn API mới của ort 2.0
 use ort::session::Session;
+use ort::execution_providers::{CUDAExecutionProvider, CoreMLExecutionProvider, OpenVINOExecutionProvider, TensorRTExecutionProvider};
 use std::error::Error;
 use std::time::Instant;
 
 const INTRA_THREAD: usize = 1;
+
 pub struct AIEngine {
     session: Session,
     input_w: u32,
@@ -30,10 +32,17 @@ pub struct FrameOutput {
 impl AIEngine {
     // 1. NẠP MÔ HÌNH (Load Model)
     pub fn new(model_path: &str, input_w: u32, input_h: u32) -> Result<Self, Box<dyn Error>> {
-        // Cấu hình ORT Session để tận dụng tối đa sức mạnh CPU
+        // Cấu hình ORT Session để tận dụng phần cứng (Hardware Acceleration)
+        // Hệ thống sẽ tự động tìm kiếm và ưu tiên dồn tải vào GPU/NPU, nếu không có sẽFallback về CPU.
         let session = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
             .with_intra_threads(INTRA_THREAD)?
+            .with_execution_providers([
+                TensorRTExecutionProvider::default().build(),
+                CUDAExecutionProvider::default().build(),
+                OpenVINOExecutionProvider::default().build(),
+                CoreMLExecutionProvider::default().build(),
+            ])?
             .commit_from_file(model_path)?;
 
         Ok(Self {
