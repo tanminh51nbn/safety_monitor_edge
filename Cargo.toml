@@ -22,3 +22,18 @@ crossbeam-channel = "0.5.15"
 sysinfo = "0.30"
 rayon = "1.10"
 fast_image_resize = "2.7"
+
+# IoT & Networking Phase 3
+dotenv = "0.15"            # Nạp setting file .env
+reqwest = { version = "0.12", features = ["blocking", "multipart", "rustls-tls"], default-features = false }
+chrono = "0.4"             # Định dạng lại Local Time cho Telegram Text
+
+[target.'cfg(target_os = "linux")'.dependencies]
+sysfs_gpio = "0.6"         # Phóng điện còi vật lý Native Linux (chỉ biên dịch trên HĐH nhúng)
+
+[dependencies.opencv]
+version = "0.92"
+optional = true
+
+[features]
+rtsp = ["opencv"]          # Cờ mở khoá chế độ RTSP Camera H264 Mạng

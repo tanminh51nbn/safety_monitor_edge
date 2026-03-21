@@ -61,3 +61,26 @@ Run Another Model: Replace <your_model_name.onnx> with your model name. And <you
 ```bash
 MODEL_PATH=models/<your_model_name.onnx> INPUT_W=<your_input_w> INPUT_H=<your_input_h> cargo run --release
 ```
+
+### 3. Telegram Bot Alert Setup (Private Mode/Tester)
+This repository supports instant Telegram notifications. The architecture is explicitly designed for **Private 1-on-1 Direct Messaging** instead of Public Shared Groups. This allows developers who clone the repo to safely test the model locally without exposing their webcam snapshots to other contributors.
+
+1. Create a `.env` file in the root folder.
+2. I've already created a bot for you to test:
+   - Bot Name: @SafetyMonitorAlert_bot (https://t.me/SafetyMonitorAlert_bot)
+
+   - TELEGRAM_BOT_TOKEN = 8629365297:AAG7rglUDNSbS9yAbSM2CCgPnsD5KM0DjNk
+3. Start a **Direct Message (Private Chat)** with your newly created Bot (Search its username and click **START**).
+   
+   *We strongly advise against adding it to a Public Group for local testing!*
+4. Get your personal Chat ID (by messaging `@userinfobot`) and put it all in your `.env`. The last, Instead TELEGRAM_CHAT_ID by your personal Chat ID:
+```env
+# 0 for Local Webcam. Put "rtsp://..." for IP Camera Stream
+CAMERA_SOURCE=0
+
+TELEGRAM_BOT_TOKEN=8629365297:AAG7rglUDNSbS9yAbSM2CCgPnsD5KM0DjNk
+TELEGRAM_CHAT_ID=your_private_chat_id_here
+
+GPIO_ALARM_PIN=18
+```
+Now, whenever the local AI detects a violation on your machine, it will instantly DM the full-resolution proof image safely to your own Telegram Inbox!

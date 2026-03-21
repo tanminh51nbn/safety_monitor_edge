@@ -5,7 +5,8 @@ mod processing;
 mod types;
 mod visualizer;
 mod alarm;
-
+mod bot_alert;
+mod iot_gpio;
 use crossbeam_channel::{Receiver, Sender};
 use image::{ImageBuffer, Rgb};
 use minifb::{Key, Window, WindowOptions};
@@ -16,7 +17,7 @@ use sysinfo::System;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-const MODEL_PATH: &str = "models/best_640x384.onnx";
+const MODEL_PATH: &str = "models/best_640x384_int8.onnx";
 const INPUT_W: u32 = 640;
 const INPUT_H: u32 = 384;
 const TARGET_CAMERA_FPS: f64 = 24.0;
@@ -97,10 +98,17 @@ struct Summary {
 fn main() {
     println!("=== HỆ THỐNG GIÁM SÁT AN TOÀN EDGE AI ===");
 
-    // 1. KHỞI TẠO MẮT (CAMERA) - TÍCH HỢP FAULT TOLERANCE
-    println!("Đang khởi động Camera...");
+    // Nạp Envs từ file rỗng .env (Cấp quyền Bot Telegram & Camera Source API)
+    let _ = dotenv::dotenv();
+    let camera_source = std::env::var("CAMERA_SOURCE").unwrap_or_else(|_| "0".to_string());
+    let telegram_token = std::env::var("TELEGRAM_BOT_TOKEN").unwrap_or_default();
+    let telegram_chat_id = std::env::var("TELEGRAM_CHAT_ID").unwrap_or_default();
+    let gpio_pin: u64 = std::env::var("GPIO_ALARM_PIN").unwrap_or_else(|_| "18".to_string()).parse().unwrap_or(18);
+
+    // 1. KHỞI TẠO MẮT (CAMERA) - TÍCH HỢP ĐA THIẾT BỊ VÀ FAULT TOLERANCE
+    println!("Đang khởi động Camera (Source: {})...", camera_source);
     let mut edge_cam = loop {
-        match camera::EdgeCamera::new() {
+        match camera::create_camera(&camera_source) {
             Ok(cam) => break cam,
             Err(e) => {
                 println!("Lỗi khởi tạo Camera: {}. Thử lại sau 2 giây...", e);
@@ -115,7 +123,7 @@ fn main() {
             Err(_) => {
                 println!("Cảnh báo: Không thể chụp ảnh mồi! Đang thử khởi động lại Camera...");
                 thread::sleep(Duration::from_secs(1));
-                if let Ok(new_cam) = camera::EdgeCamera::new() {
+                if let Ok(new_cam) = camera::create_camera(&camera_source) {
                     edge_cam = new_cam;
                 }
             }
@@ -186,13 +194,23 @@ fn main() {
                     if trigger_snapshot {
                         println!(">>> [ALARM TRIPPED] PHÁT HIỆN VI PHẠM KHÔNG ĐỘI NÓN! ĐANG LƯU BẰNG CHỨNG...");
                         let img_clone = packet.image.as_ref().clone(); 
+                        let bot_token = telegram_token.clone();
+                        let chat_id = telegram_chat_id.clone();
+                        
                         thread::spawn(move || {
-                            let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-                            let path = format!("violations/ALARM_{}.jpg", timestamp);
+                            let now = chrono::Local::now();
+                            let time_str = now.format("%d/%m/%Y %H:%M:%S").to_string();
+                            let file_str = now.format("%Y%m%d_%H%M%S").to_string();
+                            
+                            let path = format!("violations/ALARM_{}.jpg", file_str);
                             if let Err(e) = img_clone.save(&path) {
                                 println!("Lỗi lưu ảnh bằng chứng: {}", e);
                             } else {
                                 println!("Đã lưu ảnh Audit Log: {}", path);
+                                if !bot_token.is_empty() {
+                                    let caption = format!("[🚨 CẢNH BÁO AN TOÀN]\nPhát hiện người KHÔNG ĐỘI NÓN TRANG BỊ BẢO HỘ.\n⏰ Thời gian: {}", time_str);
+                                    bot_alert::send_telegram_alert(&bot_token, &chat_id, &path, &caption);
+                                }
                             }
                         });
                     }
@@ -252,10 +270,13 @@ fn main() {
         .expect("Lỗi: Không thể tạo cửa sổ!");
         window.limit_update_rate(Some(Duration::from_micros(16_600)));
 
+        let mut relay = iot_gpio::AlarmRelay::new(gpio_pin);
+
         while render_running.load(Ordering::Relaxed) && window.is_open() {
             while let Ok((boxes, is_alarming)) = boxes_rx.try_recv() {
                 last_boxes = boxes;
                 last_alarming = is_alarming;
+                relay.update(is_alarming);
             }
 
             let frame = match render_rx.recv_timeout(Duration::from_millis(5)) {
@@ -373,11 +394,11 @@ fn main() {
             }
             fail_count += 1;
             if fail_count > 100 { // Nếu mất tín hiệu ~500ms thì coi như rớt mạng camera
-                println!("!BÁO ĐỘNG!: Mất tín hiệu Camera. Đang cố gắng kết nối lại (Auto-reconnect)...");
-                if let Ok(new_cam) = camera::EdgeCamera::new() {
+                println!("!BÁO ĐỘNG!: Mất tín hiệu luồng Camera. Đang cố gắng kết nối lại (Auto-reconnect)...");
+                if let Ok(new_cam) = camera::create_camera(&camera_source) {
                     edge_cam = new_cam;
                     fail_count = 0;
-                    println!("=> Đã khôi phục Camera thành công!");
+                    println!("=> Đã khôi phục luồng Video thành công!");
                 }
                 thread::sleep(Duration::from_millis(1000)); // Nghỉ 1s chờ Camera ổn định
             } else {
